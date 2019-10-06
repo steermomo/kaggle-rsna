@@ -8,6 +8,7 @@ import glob
 import multiprocessing as mp
 import numpy as np
 
+# from ww import f
 # Functions
 
 def window_image(img, window_center, window_width, intercept, slope):
@@ -63,9 +64,6 @@ dir_img = '/home/jupyter/input/rsna-train-stage-1-images-png-224x/stage_1_test_p
 if not path.exists(dir_img):
     print(f'make dir => {dir_img}')
     os.makedirs(dir_img, )
-
-dir_dcm = '/home/jupyter/input/stage_1_test_images'
-dir_img = '/home/jupyter/input/rsna-train-stage-1-images-png-224x/stage_1_test_png_224x'
 
 dicom = glob.glob(os.path.join(dir_dcm, '*.dcm'))
 
