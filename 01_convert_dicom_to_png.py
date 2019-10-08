@@ -51,15 +51,18 @@ def convert_to_png(dcm_in):
         return
     dcm = pydicom.dcmread(dcm_in)
     window_center, window_width, intercept, slope = get_windowing(dcm)
-
-    img = pydicom.read_file(dcm_in).pixel_array
+    
+    try:
+        img = pydicom.read_file(dcm_in).pixel_array
+    except ValueError:
+        return
     img = window_image(img, window_center, window_width, intercept, slope)
     cv2.imwrite(save_path, img)
 
 # Extract images in parallel
 
-dir_dcm = '/home/jupyter/input/stage_1_test_images'
-dir_img = '/home/jupyter/input/rsna-train-stage-1-images-png-224x/stage_1_test_png_224x'
+dir_dcm = '/home/jupyter/rsna/source_data/stage_1_test_images'
+dir_img = '/home/jupyter/rsna/rsna-train-stage-1-images-png-224x/stage_1_test_png_224x'
 
 if not path.exists(dir_img):
     print(f'make dir => {dir_img}')
@@ -74,8 +77,8 @@ pool.close()
 
 
 
-dir_dcm = '/home/jupyter/input/stage_1_train_images'
-dir_img = '/home/jupyter/input/rsna-train-stage-1-images-png-224x/stage_1_train_png_224x'
+dir_dcm = '/home/jupyter/rsna/source_data/stage_1_train_images'
+dir_img = '/home/jupyter/rsna/rsna-train-stage-1-images-png-224x/stage_1_train_png_224x'
 
 if not path.exists(dir_img):
     print(f'make dir => {dir_img}')
