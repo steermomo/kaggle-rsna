@@ -1,5 +1,12 @@
 # https://course.fast.ai/start_gcp.html
-# proxychains4 火星环境下需要代理
+
+# 命令根据[fastai GCP setup](https://course.fast.ai/start_gcp.html), 并针对我的任务进行了修改。
+
+# Google Cloud’s command line interface (CLI)安装配置部分见[fastai GCP setup](https://course.fast.ai/start_gcp.html)
+
+# 另外因为火星网络环境不够稳定, 我在wsl中配置了proxychains4, 连到Windows主机的sock5代理.
+
+
 # 创建抢占式实例
 ```bash
 export IMAGE_FAMILY="pytorch-latest-gpu" # or "pytorch-latest-cpu" for non-GPU instances
@@ -18,4 +25,6 @@ proxychains4 gcloud compute instances create $INSTANCE_NAME --zone=$ZONE --image
 proxychains4 gcloud beta compute --project "limongty" ssh --zone "asia-southeast1-b" jupyter@"kaggle-rsna" -- -L 8080:localhost:8080
 ```
 
-#连接成功后本地浏览器打开`localhost:8080`可以使用远程环境.
+# 连接成功后本地浏览器打开`localhost:8080`可以使用远程环境.
+
+# 网络不稳定， 必须开tmux
