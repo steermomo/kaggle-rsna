@@ -1,3 +1,6 @@
+# 需要配置kaggle api
+# https://github.com/Kaggle/kaggle-api
+
 pip install kaggle > /dev/null
 
 DOWNLOAD_DIR=/home/jupyter/download
