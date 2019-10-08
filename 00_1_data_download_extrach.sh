@@ -1,3 +1,5 @@
+pip install kaggle > /dev/null
+
 DOWNLOAD_DIR=/home/jupyter/download
 EXTRACT_DIR=/home/jupyter/rsna/source_data
 

@@ -2,11 +2,11 @@ import os
 from os import path
 import tqdm
 import os
-import pydicom
 import cv2
 import glob
 import multiprocessing as mp
 import numpy as np
+import pydicom
 
 # from ww import f
 # Functions
