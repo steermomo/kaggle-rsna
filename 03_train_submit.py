@@ -4,7 +4,8 @@
 # In[ ]:
 
 
-#jupyter nbconvert --to python 03_train_submit.ipynb
+# jupyter nbconvert --to python 03_train_submit.ipynb
+# 在命令行下将本文件转为python文件 挂在tmux下运行 网络不稳定 在notebook内训练会丢失结果
 
 
 # In[1]:
@@ -86,8 +87,8 @@ class IntracranialDataset(Dataset):
 
 
 n_classes = 6
-n_epochs = 300
-batch_size = 5*8
+n_epochs = 3
+batch_size = 5*7
 
 
 # In[7]:
@@ -135,8 +136,9 @@ class Logger(object):
         self.file = None
 
     def open(self, file, mode=None):
-        if mode is None: mode ='w'
+        if mode is None: mode ='a+'
         self.file = open(file, mode)
+        self.file.write('\n----\n')
 
     def write(self, message, is_terminal=1, is_file=1 ):
         if '\r' in message: is_file=0
@@ -234,6 +236,16 @@ for epoch in range(epoch_start, n_epochs):
         tr_loss += loss.item()
 
         optimizer.step()
+        
+        if step % 100 == 0:
+            # 训练一个epoc太久
+            save_state = {
+                'optim': optimizer.state_dict(),
+                'epoch': epoch+1,
+                'state': model.state_dict(),
+            }
+            with open(ckpt_path, 'wb') as save_file:
+                torch.save(save_state, save_file)
     
     epoch_loss = tr_loss / len(data_loader_train)
     log.write('Training Loss: {:.4f}'.format(epoch_loss))
@@ -282,7 +294,8 @@ for epoch in range(epoch_start, n_epochs):
 #     val_pred = val_pred.reshape(len(val_dataset), n_classes)
 #     val_true = val_true.reshape(len(val_dataset), n_classes)
     
-    loss = log_loss(val_true, val_pred, sample_weight=([1, 1, 1, 1, 1, 2] * len(val_dataset)))
+#     loss = log_loss(val_true, val_pred, sample_weight=([1, 1, 1, 1, 1, 2] * len(val_dataset)))
+    loss = log_loss(val_true, val_pred, sample_weight=([2, 1, 1, 1, 1, 1,] * len(val_dataset)))
     
     save_state = {
             'optim': optimizer.state_dict(),
@@ -305,6 +318,7 @@ for epoch in range(epoch_start, n_epochs):
 
 # Inference
 
+print('\nInference')
 for param in model.parameters():
     param.requires_grad = False
 
@@ -313,7 +327,7 @@ model.eval()
 test_pred = np.zeros((len(test_dataset) * n_classes, 1))
 
 for i, x_batch in enumerate(data_loader_test):
-    print(f'\r i / {len(data_loader_test)}', end='')
+    print(f'\r {i} / {len(data_loader_test)}', end='')
     x_batch = x_batch["image"]
     x_batch = x_batch.to(device, dtype=torch.float)
     
