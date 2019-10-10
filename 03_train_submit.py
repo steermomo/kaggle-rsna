@@ -8,7 +8,7 @@
 # 在命令行下将本文件转为python文件 挂在tmux下运行 网络不稳定 在notebook内训练会丢失结果
 
 
-# In[1]:
+# In[2]:
 
 
 import os
@@ -87,7 +87,7 @@ class IntracranialDataset(Dataset):
 
 
 n_classes = 6
-n_epochs = 3
+n_epochs = 100
 batch_size = 5*7
 
 
@@ -202,7 +202,7 @@ if path.exists(ckpt_path):
     epoch_start = ckpt['epoch']
     model.load_state_dict(ckpt['state'])
     
-    log.write(f'resume from epoch {epoch_start}')
+    log.write(f'resume from epoch {epoch_start}\n')
 else:
     epoch_start = 0
 
@@ -352,7 +352,7 @@ submission.to_csv('submission.csv', index=False)
 submission.head()
 
 
-# In[ ]:
+# In[3]:
 
 
 get_ipython().system('kaggle competitions submit -f submission.csv -m from_gcp rsna-intracranial-hemorrhage-detection')
