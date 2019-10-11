@@ -108,8 +108,8 @@ batch_size = 6*7*3 * 2 # se_resnext50_32x4d 128*128
 batch_size = 6*7*2*4 # 16GB se_resnext50_32x4d 164*164  fp16
 resize_size = (164, 164)
 
-# batch_size = int(1.4*6*7*1*3) # 16GB se_resnext50_32x4d 164*164  fp16
-# resize_size = (224, 224)
+batch_size = int(1.4*6*7*1*3) # 16GB se_resnext50_32x4d 164*164  fp16
+resize_size = (224, 224)
 
 val_batch_size = batch_size * 3
 
@@ -244,6 +244,7 @@ check_point = None
 ckpt_path = f'{saved}/{model_name}_fold{fold}_checkpoint.pth'
 amp_ckpt_path = f'{saved}/{model_name}_fold{fold}_amp_checkpoint.pt'
 
+# amp_ckpt_path = f'{saved}/{model_name}_amp_checkpoint_{11}.pt'
 
 opt_level = 'O1'
 
@@ -274,6 +275,7 @@ else:
     
 print(f'training from epoch {epoch_start}')
     
+# amp_ckpt_path = f'{saved}/{model_name}_fold{fold}_amp_checkpoint.pt'
 
 
 # In[ ]:
@@ -282,10 +284,13 @@ print(f'training from epoch {epoch_start}')
 def do_eval():
     print(f'==> eval')
     model.eval()
-    val_pred = np.zeros((len(val_dataset) * n_classes, 1))
-    val_true = np.zeros((len(val_dataset) * n_classes, 1))
+#     val_pred = np.zeros((len(val_dataset) * n_classes, 1))
+#     val_true = np.zeros((len(val_dataset) * n_classes, 1))
     val_len = len(data_loader_val)
     log.write(f'Epoch {epoch}, val\n')
+    
+    val_loss = 0.
+    
     tbar = tqdm(data_loader_val, ascii=True)
     for val_step, val_batch in enumerate(tbar):
 #         log.write(f'\r{val_step:05d} / {val_len}')
@@ -298,14 +303,11 @@ def do_eval():
 
             outputs = model(inputs)
             
-            val_pred[(val_step * val_batch_size * n_classes):((val_step + 1) * val_batch_size * n_classes)] = torch.sigmoid(
-            outputs).detach().cpu().reshape((len(inputs) * n_classes, 1))
+            loss = criterion(outputs, labels)
             
-            val_true[(val_step * val_batch_size * n_classes):((val_step + 1) * val_batch_size * n_classes)] = labels.cpu().reshape((len(inputs) * n_classes, 1))
+            val_loss += loss
             
-    
-
-    loss = log_loss(val_true, val_pred, sample_weight=([1, 1, 1, 1, 1, 2,] * len(val_dataset)))
+    val_loss /= val_len
         
     checkpoint = {
         'model': model.state_dict(),
@@ -314,7 +316,7 @@ def do_eval():
         'amp': amp.state_dict(),
         'val_loss': loss
     }
-    torch.save(checkpoint, f'{saved}/{model_name}_amp_checkpoint_{epoch}.pt')
+    torch.save(checkpoint, f'{saved}/{model_name}_fold{fold}_amp_checkpoint_{epoch}.pt')
     log.write(f'epoch {epoch} - val loss: {loss}\n')
 
 
@@ -374,7 +376,7 @@ for epoch in range(epoch_start, n_epochs):
                 'epoch': epoch,
                 'amp': amp.state_dict()
             }
-            torch.save(checkpoint, f'{saved}/{model_name}_amp_checkpoint.pt')
+            torch.save(checkpoint, amp_ckpt_path)
     
     epoch_loss = tr_loss / len(data_loader_train)
     log.write('\nTraining Loss: {:.4f}\n'.format(epoch_loss))
@@ -387,7 +389,7 @@ for epoch in range(epoch_start, n_epochs):
         'epoch': epoch,
         'amp': amp.state_dict()
     }
-    torch.save(checkpoint, f'{saved}/{model_name}_amp_checkpoint.pt')
+    torch.save(checkpoint, amp_ckpt_path)
         
 #     if epoch < 5:
 #         # do val from epoch 20
