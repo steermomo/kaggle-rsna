@@ -26,8 +26,12 @@ import albumentations as alb
 from albumentations.pytorch import ToTensor
 from torch.utils.data import Dataset
 import torchvision
-from tqdm import tqdm_notebook as tqdm
+# from tqdm import tqdm_notebook as tqdm
+from tqdm import tqdm
 from matplotlib import pyplot as plt
+import pretrainedmodels
+
+from apex import amp
 
 from sklearn.metrics import log_loss
 
@@ -94,7 +98,25 @@ class IntracranialDataset(Dataset):
 
 n_classes = 6
 n_epochs = 100
-batch_size = 5*7 * 3
+
+
+n_classes = 6
+n_epochs = 100
+
+batch_size = 6*7 # se_resnext50_32x4d 224*224
+
+batch_size = 6*7*3 * 2 # se_resnext50_32x4d 128*128
+
+batch_size = 6*7*2*7 # 16GB se_resnext50_32x4d 128*128  fp16
+resize_size = (128, 128)
+
+batch_size = 6*7*2*4 # 16GB se_resnext50_32x4d 164*164  fp16
+resize_size = (164, 164)
+
+batch_size = int(1.4*6*7*1*3) # 16GB se_resnext50_32x4d 164*164  fp16
+resize_size = (224, 224)
+
+val_batch_size = batch_size * 3
 
 
 # In[9]:
@@ -108,19 +130,20 @@ transform_train = Compose([
     alb.RandomRotate90(),
     alb.GridDistortion(),
     ShiftScaleRotate(),
-    alb.Resize(512, 512),
+    alb.Resize(*resize_size),
     ToTensor()
 ])
 
 transform_test= Compose([
-    alb.Resize(512, 512),
+#     alb.Resize(512, 512),
+    alb.Resize(*resize_size),
     ToTensor()
 ])
 
 test_dataset = IntracranialDataset(
     csv_file=f'{saved}/test.csv', path=dir_test_img, transform=transform_test, labels=False)
 
-data_loader_test = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+data_loader_test = torch.utils.data.DataLoader(test_dataset, batch_size=val_batch_size, shuffle=False, num_workers=8, pin_memory=True)
 
 
 # In[10]:
@@ -160,14 +183,19 @@ class Logger(object):
 # In[11]:
 
 
-if use_cpu:
-    device = torch.device("cpu")
-else:
-    device = torch.device("cuda:0")
+device = torch.device("cuda:0")
+
 # model = torch.hub.load('facebookresearch/WSL-Images', 'resnext101_32x8d_wsl')
 # model.fc = torch.nn.Linear(2048, n_classes)
-model = torchvision.models.resnet34(pretrained=True)
-model.fc = torch.nn.Linear(512, n_classes)
+# model = torchvision.models.resnet34(pretrained=True)
+# model.fc = torch.nn.Linear(512, n_classes)
+
+
+#(last_linear): Linear(in_features=2048, out_features=1000, bias=True)
+model = pretrainedmodels.se_resnext50_32x4d()
+model.avg_pool = torch.nn.AdaptiveAvgPool2d(output_size=1)
+model.last_linear = torch.nn.Linear(2048, n_classes)
+model_name = 'se_resnext50_32x4d'
 
 model.to(device)
 
@@ -186,27 +214,38 @@ log = Logger()
 log.open(path.join(saved, 'log.txt'))
 
 
-# In[13]:
+# In[ ]:
 
 
-check_point = None
+ckpt_path = f'{saved}/{model_name}_checkpoint.pth'
+amp_ckpt_path = f'{saved}/{model_name}_amp_checkpoint.pt'
 
 
-# In[14]:
+opt_level = 'O1'
 
+if path.exists(amp_ckpt_path):
+    print(f'===> load {amp_ckpt_path}')
+    checkpoint = torch.load(amp_ckpt_path)
+    model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    amp.load_state_dict(checkpoint['amp'])
+    epoch_start = checkpoint['epoch']
 
-ckpt_path = f'{saved}/checkpoint.pth'
-
-if use_cpu:
-    ckpt = torch.load(ckpt_path, map_location='cpu')
-    
-else:
+elif path.exists(ckpt_path):
+    print(f'===> load {ckpt_path}')
     ckpt = torch.load(ckpt_path, map_location='cuda:0')
-
-optimizer.load_state_dict(ckpt['optim']),
-epoch_start = ckpt['epoch']
-model.load_state_dict(ckpt['state'])
+    optimizer.load_state_dict(ckpt['optim']),
+    epoch_start = ckpt['epoch']
+    model.load_state_dict(ckpt['state'])
     
+    # Initialization
+    
+    model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
+    
+    log.write(f'resume from epoch {epoch_start}\n')
+else:
+    epoch_start = 0
 
 
 # In[ ]:
@@ -268,8 +307,9 @@ model.eval()
 
 test_pred = np.zeros((len(test_dataset) * n_classes, 1))
 
-for i, x_batch in enumerate(data_loader_test):
-    print(f'\r {i} / {len(data_loader_test)}', end='')
+tbar = tqdm(data_loader_test)
+for i, x_batch in enumerate(tbar):
+#     print(f'\r {i} / {len(data_loader_test)}', end='')
     x_batch = x_batch["image"]
     x_batch = x_batch.to(device, dtype=torch.float)
     
@@ -277,7 +317,7 @@ for i, x_batch in enumerate(data_loader_test):
         
 #         pred = model(x_batch)
         pred = cls_do_eval([model], x_batch, augment)
-        test_pred[(i * batch_size * n_classes):((i + 1) * batch_size * n_classes)] = pred.detach().cpu().reshape((len(x_batch) * n_classes, 1))
+        test_pred[(i * val_batch_size * n_classes):((i + 1) * val_batch_size * n_classes)] = pred.detach().cpu().reshape((len(x_batch) * n_classes, 1))
         
 #         test_pred[(i * batch_size * n_classes):((i + 1) * batch_size * n_classes)] = torch.sigmoid(
 #             pred).detach().cpu().reshape((len(x_batch) * n_classes, 1))
@@ -292,12 +332,12 @@ submission =  pd.read_csv(os.path.join(dir_csv, 'stage_1_sample_submission.csv')
 submission = pd.concat([submission.drop(columns=['Label']), pd.DataFrame(test_pred)], axis=1)
 submission.columns = ['ID', 'Label']
 
-submission.to_csv('submission.csv', index=False)
+submission.to_csv(f'submission_{resize_size[0]}.csv', index=False)
 submission.head()
 
 
 # In[ ]:
 
 
-#!kaggle competitions submit -f submission.csv -m from_gcp rsna-intracranial-hemorrhage-detection
+#!kaggle competitions submit -f submission_164.csv -m from_gcp rsna-intracranial-hemorrhage-detection
 

@@ -8,7 +8,7 @@
 # 在命令行下将本文件转为python文件 挂在tmux下运行 网络不稳定 在notebook内训练会丢失结果
 
 
-# In[2]:
+# In[1]:
 
 
 import os
@@ -19,6 +19,7 @@ import pydicom
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
 import sys
 from albumentations import Compose, ShiftScaleRotate, Resize
@@ -26,10 +27,13 @@ import albumentations as alb
 from albumentations.pytorch import ToTensor
 from torch.utils.data import Dataset
 import torchvision
-from tqdm import tqdm_notebook as tqdm
+from tqdm import tqdm
 from matplotlib import pyplot as plt
 
+from apex import amp
+
 from sklearn.metrics import log_loss
+import pretrainedmodels
 
 
 # In[ ]:
@@ -44,8 +48,13 @@ dir_test_img = '/home/jupyter/rsna/rsna-train-stage-1-images-png-224x/stage_1_te
 
 
 saved = 'saved'
-train = pd.read_csv(f'{saved}/train.csv')
-test = pd.read_csv(f'{saved}/test.csv')
+fold = 0
+
+# train = pd.read_csv(f'{saved}/train_fold{fold}.csv')
+
+
+# train = pd.read_csv(f'{saved}/train.csv')
+# test = pd.read_csv(f'{saved}/test.csv')
 
 
 # In[4]:
@@ -88,8 +97,25 @@ class IntracranialDataset(Dataset):
 
 n_classes = 6
 n_epochs = 100
-batch_size = 5*7
 
+batch_size = 6*7 # se_resnext50_32x4d 224*224
+
+batch_size = 6*7*3 * 2 # se_resnext50_32x4d 128*128
+
+# batch_size = 6*7*2*7 # 16GB se_resnext50_32x4d 128*128  fp16
+# resize_size = (128, 128)
+
+batch_size = 6*7*2*4 # 16GB se_resnext50_32x4d 164*164  fp16
+resize_size = (164, 164)
+
+# batch_size = int(1.4*6*7*1*3) # 16GB se_resnext50_32x4d 164*164  fp16
+# resize_size = (224, 224)
+
+val_batch_size = batch_size * 3
+
+
+# 先 128*128 训练，早期收敛
+# 再用 224*224 训练
 
 # In[7]:
 
@@ -102,27 +128,40 @@ transform_train = Compose([
     alb.RandomRotate90(),
     alb.GridDistortion(),
     ShiftScaleRotate(),
-    alb.Resize(512, 512),
+    alb.Resize(*resize_size),
     ToTensor()
 ])
 
 transform_test= Compose([
-    alb.Resize(512, 512),
+#     alb.Resize(512, 512),
+    alb.Resize(*resize_size),
     ToTensor()
 ])
 
+# train_dataset = IntracranialDataset(
+#     csv_file=f'{saved}/train.csv', path=dir_train_img, transform=transform_train, labels=True)
+
+# val_dataset = IntracranialDataset(
+#     csv_file=f'{saved}/val.csv', path=dir_train_img, transform=transform_test, labels=True)
+
+# test_dataset = IntracranialDataset(
+#     csv_file=f'{saved}/test.csv', path=dir_test_img, transform=transform_test, labels=False)
+
+
 train_dataset = IntracranialDataset(
-    csv_file=f'{saved}/train.csv', path=dir_train_img, transform=transform_train, labels=True)
+    csv_file=f'{saved}/train_fold{fold}.csv', path=dir_train_img, transform=transform_train, labels=True)
 
 val_dataset = IntracranialDataset(
-    csv_file=f'{saved}/val.csv', path=dir_train_img, transform=transform_test, labels=True)
+    csv_file=f'{saved}/val_fold{fold}.csv', path=dir_train_img, transform=transform_test, labels=True)
 
 test_dataset = IntracranialDataset(
     csv_file=f'{saved}/test.csv', path=dir_test_img, transform=transform_test, labels=False)
 
-data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-data_loader_val = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
-data_loader_test = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+# pin_memory 加速
+data_loader_train = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, drop_last=True)
+data_loader_val = torch.utils.data.DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False, num_workers=8, pin_memory=True)
+data_loader_test = torch.utils.data.DataLoader(test_dataset, batch_size=val_batch_size, shuffle=False, num_workers=8, pin_memory=True)
 
 
 # In[8]:
@@ -166,14 +205,21 @@ device = torch.device("cuda:0")
 
 # model = torch.hub.load('facebookresearch/WSL-Images', 'resnext101_32x8d_wsl')
 # model.fc = torch.nn.Linear(2048, n_classes)
-model = torchvision.models.resnet34(pretrained=True)
-model.fc = torch.nn.Linear(512, n_classes)
+# model = torchvision.models.resnet34(pretrained=True)
+# model.fc = torch.nn.Linear(512, n_classes)
+
+
+#(last_linear): Linear(in_features=2048, out_features=1000, bias=True)
+model = pretrainedmodels.se_resnext50_32x4d()
+model.avg_pool = torch.nn.AdaptiveAvgPool2d(output_size=1)
+model.last_linear = torch.nn.Linear(2048, n_classes)
+model_name = 'se_resnext50_32x4d'
 
 model.to(device)
 
-criterion = torch.nn.BCEWithLogitsLoss()
-plist = [{'params': model.parameters(), 'lr': 2e-5}]
-optimizer = optim.Adam(plist, lr=2e-5)
+# criterion = torch.nn.BCEWithLogitsLoss()
+plist = [{'params': model.parameters(), 'lr': 2e-4}]
+optimizer = optim.Adam(plist, lr=2e-4)
 
 # model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 
@@ -195,31 +241,110 @@ check_point = None
 # In[ ]:
 
 
-ckpt_path = f'{saved}/checkpoint.pth'
-if path.exists(ckpt_path):
+ckpt_path = f'{saved}/{model_name}_fold{fold}_checkpoint.pth'
+amp_ckpt_path = f'{saved}/{model_name}_fold{fold}_amp_checkpoint.pt'
+
+
+opt_level = 'O1'
+
+if path.exists(amp_ckpt_path):
+    print(f'===> load {amp_ckpt_path}')
+    checkpoint = torch.load(amp_ckpt_path)
+    model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    amp.load_state_dict(checkpoint['amp'])
+    epoch_start = checkpoint['epoch']
+
+elif path.exists(ckpt_path):
+    print(f'===> load {ckpt_path}')
     ckpt = torch.load(ckpt_path, map_location='cuda:0')
     optimizer.load_state_dict(ckpt['optim']),
     epoch_start = ckpt['epoch']
     model.load_state_dict(ckpt['state'])
     
+    # Initialization
+    
+    model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
+    
     log.write(f'resume from epoch {epoch_start}\n')
 else:
     epoch_start = 0
+    model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
+    
+print(f'training from epoch {epoch_start}')
+    
 
+
+# In[ ]:
+
+
+def do_eval():
+    print(f'==> eval')
+    model.eval()
+    val_pred = np.zeros((len(val_dataset) * n_classes, 1))
+    val_true = np.zeros((len(val_dataset) * n_classes, 1))
+    val_len = len(data_loader_val)
+    log.write(f'Epoch {epoch}, val\n')
+    tbar = tqdm(data_loader_val, ascii=True)
+    for val_step, val_batch in enumerate(tbar):
+#         log.write(f'\r{val_step:05d} / {val_len}')
+        with torch.no_grad():
+            inputs = val_batch["image"]
+            labels = val_batch["labels"]
+
+            inputs = inputs.to(device, dtype=torch.float)
+            labels = labels.to(device, dtype=torch.float)
+
+            outputs = model(inputs)
+            
+            val_pred[(val_step * val_batch_size * n_classes):((val_step + 1) * val_batch_size * n_classes)] = torch.sigmoid(
+            outputs).detach().cpu().reshape((len(inputs) * n_classes, 1))
+            
+            val_true[(val_step * val_batch_size * n_classes):((val_step + 1) * val_batch_size * n_classes)] = labels.cpu().reshape((len(inputs) * n_classes, 1))
+            
+    
+
+    loss = log_loss(val_true, val_pred, sample_weight=([1, 1, 1, 1, 1, 2,] * len(val_dataset)))
+        
+    checkpoint = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'epoch': epoch,
+        'amp': amp.state_dict(),
+        'val_loss': loss
+    }
+    torch.save(checkpoint, f'{saved}/{model_name}_amp_checkpoint_{epoch}.pt')
+    log.write(f'epoch {epoch} - val loss: {loss}\n')
+
+
+# In[ ]:
+
+
+torch.backends.cudnn.benchmark = True
+
+weights = torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 2.0]).cuda()
+def criterion(y_pred,y_true):
+    return F.binary_cross_entropy_with_logits(y_pred,
+                                  y_true,
+                                  weights.repeat(y_pred.shape[0],1))
 
 for epoch in range(epoch_start, n_epochs):
     
     print('Epoch {}/{}'.format(epoch, n_epochs - 1))
     print('-' * 10)
-
+    
+#     do_eval()
+    
     model.train()    
     tr_loss = 0
     
 
-    tk0 = data_loader_train
+#     tk0 = data_loader_train
+    tbar = tqdm(data_loader_train, ascii=True)
     trn_len = len(data_loader_train)
-    for step, batch in enumerate(tk0):
-        log.write(f'\r{step:05d} / {trn_len}')
+    for step, batch in enumerate(tbar):
+#         log.write(f'\r{step:05d} / {trn_len}')
         optimizer.zero_grad()
         inputs = batch["image"]
         labels = batch["labels"]
@@ -229,131 +354,51 @@ for epoch in range(epoch_start, n_epochs):
 
         outputs = model(inputs)
         loss = criterion(outputs, labels)
-        loss.backward()
         
-        print(f' loss: {loss.item():.4f}', end='')
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+#         loss.backward()
+        optimizer.step()
+        
+#         print(f' loss: {loss.item():.4f}', end='')
         
         tr_loss += loss.item()
 
-        optimizer.step()
+        tbar.set_description(f'loss: {loss.item():.4f}')
         
-        if step % 100 == 0:
-            # 训练一个epoc太久
-            save_state = {
-                'optim': optimizer.state_dict(),
-                'epoch': epoch+1,
-                'state': model.state_dict(),
+        if (step+1) % 100 == 0:
+            # 训练一个epoc太久                   
+            checkpoint = {
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'epoch': epoch,
+                'amp': amp.state_dict()
             }
-            with open(ckpt_path, 'wb') as save_file:
-                torch.save(save_state, save_file)
+            torch.save(checkpoint, f'{saved}/{model_name}_amp_checkpoint.pt')
     
     epoch_loss = tr_loss / len(data_loader_train)
-    log.write('Training Loss: {:.4f}'.format(epoch_loss))
+    log.write('\nTraining Loss: {:.4f}\n'.format(epoch_loss))
 
     
-        
-    if epoch % 1 == 0:
-        save_state = {
-            'optim': optimizer.state_dict(),
-            'epoch': epoch+1,
-            'state': model.state_dict(),
-        }
-        with open(ckpt_path, 'wb') as save_file:
-            torch.save(save_state, save_file)
-        
-    if epoch < 20:
-        # do val from epoch 20
-        continue
-        
-    if epoch % 5 != 0:
-        continue
-        
-    # do val
-    val_pred = np.zeros((len(val_dataset) * n_classes, 1))
-    val_true = np.zeros((len(val_dataset) * n_classes, 1))
-    val_len = len(data_loader_val)
-    log.write(f'Epoch {epoch}, val\n')
-    for val_step, val_batch in enumerate(data_loader_val):
-        log.write(f'\r{val_step:05d} / {val_len}')
-        with torch.no_grad():
-            inputs = val_batch["image"]
-            labels = val_batch["labels"]
-
-            inputs = inputs.to(device, dtype=torch.float)
-            labels = labels.to(device, dtype=torch.float)
-
-            outputs = model(inputs)
-#             loss = criterion(outputs, labels)
-            
-            val_pred[(val_step * batch_size * n_classes):((val_step + 1) * batch_size * n_classes)] = torch.sigmoid(
-            outputs).detach().cpu().reshape((len(inputs) * n_classes, 1))
-            
-            val_true[(val_step * batch_size * n_classes):((val_step + 1) * batch_size * n_classes)] = labels.cpu().reshape((len(inputs) * n_classes, 1))
-            
     
-#     val_pred = val_pred.reshape(len(val_dataset), n_classes)
-#     val_true = val_true.reshape(len(val_dataset), n_classes)
-    
-#     loss = log_loss(val_true, val_pred, sample_weight=([1, 1, 1, 1, 1, 2] * len(val_dataset)))
-    loss = log_loss(val_true, val_pred, sample_weight=([2, 1, 1, 1, 1, 1,] * len(val_dataset)))
-    
-    save_state = {
-            'optim': optimizer.state_dict(),
-            'epoch': epoch+1,
-            'state': model.state_dict(),
-            'val_loss': loss,
-        }
-    with open(f'{saved}/checkpoint_{epoch}.pth', 'wb') as save_file:
-        torch.save(save_state, save_file)
-    log.write(f'loss: {loss}\n')
+    checkpoint = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'epoch': epoch,
+        'amp': amp.state_dict()
+    }
+    torch.save(checkpoint, f'{saved}/{model_name}_amp_checkpoint.pt')
+        
+#     if epoch < 5:
+#         # do val from epoch 20
+#         continue
+        
+    if (epoch + 1) % 2 == 0:
+        do_eval()
+ 
         
     
         
 
     
-
-
-# In[ ]:
-
-
-# Inference
-
-print('\nInference')
-for param in model.parameters():
-    param.requires_grad = False
-
-model.eval()
-
-test_pred = np.zeros((len(test_dataset) * n_classes, 1))
-
-for i, x_batch in enumerate(data_loader_test):
-    print(f'\r {i} / {len(data_loader_test)}', end='')
-    x_batch = x_batch["image"]
-    x_batch = x_batch.to(device, dtype=torch.float)
-    
-    with torch.no_grad():
-        
-        pred = model(x_batch)
-        
-        test_pred[(i * batch_size * n_classes):((i + 1) * batch_size * n_classes)] = torch.sigmoid(
-            pred).detach().cpu().reshape((len(x_batch) * n_classes, 1))
-
-
-# In[ ]:
-
-
-# Submission
-
-submission =  pd.read_csv(os.path.join(dir_csv, 'stage_1_sample_submission.csv'))
-submission = pd.concat([submission.drop(columns=['Label']), pd.DataFrame(test_pred)], axis=1)
-submission.columns = ['ID', 'Label']
-
-submission.to_csv('submission.csv', index=False)
-submission.head()
-
-
-# In[3]:
-
-
-get_ipython().system('kaggle competitions submit -f submission.csv -m from_gcp rsna-intracranial-hemorrhage-detection')
 
