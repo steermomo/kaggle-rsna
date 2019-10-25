@@ -116,7 +116,7 @@ resize_size = (164, 164)
 batch_size = int(1.4*6*7*1*3) # 16GB se_resnext50_32x4d 164*164  fp16
 resize_size = (224, 224)
 
-val_batch_size = batch_size * 3
+val_batch_size = batch_size * 4
 
 
 # In[9]:
@@ -218,7 +218,8 @@ log.open(path.join(saved, 'log.txt'))
 
 
 ckpt_path = f'{saved}/{model_name}_checkpoint.pth'
-amp_ckpt_path = f'{saved}/{model_name}_amp_checkpoint.pt'
+fold = 0
+amp_ckpt_path = f'{saved}/{model_name}_fold{fold}_amp_checkpoint.pt'
 
 
 opt_level = 'O1'
@@ -332,12 +333,25 @@ submission =  pd.read_csv(os.path.join(dir_csv, 'stage_1_sample_submission.csv')
 submission = pd.concat([submission.drop(columns=['Label']), pd.DataFrame(test_pred)], axis=1)
 submission.columns = ['ID', 'Label']
 
-submission.to_csv(f'submission_{resize_size[0]}.csv', index=False)
+submission.to_csv(f'submission_{resize_size[0]}_fold{fold}.csv', index=False)
 submission.head()
+
+
+# In[8]:
+
+
+submission =  pd.read_csv(os.path.join(dir_csv, 'stage_1_sample_submission.csv'))
+submission.head(10)
+
+
+# In[1]:
+
+
+# !head submission_224.csv
 
 
 # In[ ]:
 
 
-#!kaggle competitions submit -f submission_164.csv -m from_gcp rsna-intracranial-hemorrhage-detection
+#!kaggle competitions submit -f submission_224.csv -m from_gcp rsna-intracranial-hemorrhage-detection
 

@@ -52,6 +52,9 @@ def convert_to_png(dcm_in):
     dcm = pydicom.dcmread(dcm_in)
     window_center, window_width, intercept, slope = get_windowing(dcm)
     
+    window_center = 80
+    window_width = 200
+    
     try:
         img = pydicom.read_file(dcm_in).pixel_array
     except ValueError:

@@ -35,16 +35,41 @@ def hist_scaled_px(self:DcmDataset, brks=None, min_px=None, max_px=None):
 
 
 def convert_to_png_fastai(dcm_in):
-    save_path = os.path.join(dir_img, os.path.basename(dcm_in)[:-3] + 'npy')
+#     save_path = os.path.join(dir_img, os.path.basename(dcm_in)[:-3] + 'npy')
+    save_path = os.path.join(dir_img, os.path.basename(dcm_in)[:-3] + 'png')
     if path.exists(save_path):
         return
-    dcm = dcmread(dcm_in)
-    tensor = dcm.windowed(*dicom_windows.subdural).numpy()
+    try:
+#         img = pydicom.read_file(dcm_in).pixel_array
+        dcm = dcmread(dcm_in)
+        tensor = dcm.windowed(*dicom_windows.subdural).numpy()
+    except ValueError:
+        return
     
-    np.save(save_path, tensor)
+    
+    cv2.imwrite(save_path, tensor)
+#     np.save(save_path, tensor)
 
 # Extract images in parallel
 p_size = int(mp.cpu_count() / 2)
+p_size = mp.cpu_count()
+# p_size = 1
+
+dir_dcm = '/home/jupyter/rsna/source_data/stage_1_train_images'
+dir_img = '/home/jupyter/rsna/rsna-train-stage-1-images_fastai_subdural_windows/stage_1_train_npy'
+
+if not path.exists(dir_img):
+    print(f'make dir => {dir_img}')
+    os.makedirs(dir_img, )
+    
+dicom = glob.glob(os.path.join(dir_dcm, '*.dcm'))
+
+pool = mp.Pool(p_size)
+for _ in tqdm.tqdm(pool.imap_unordered(convert_to_png_fastai, dicom), total=len(dicom)):
+    pass
+pool.close()
+
+
 
 dir_dcm = '/home/jupyter/rsna/source_data/stage_1_test_images'
 dir_img = '/home/jupyter/rsna/rsna-train-stage-1-images_fastai_subdural_windows/stage_1_test_npy'
@@ -62,16 +87,3 @@ pool.close()
 
 
 
-dir_dcm = '/home/jupyter/rsna/source_data/stage_1_train_images'
-dir_img = '/home/jupyter/rsna/rsna-train-stage-1-images_fastai_subdural_windows/stage_1_train_npy'
-
-if not path.exists(dir_img):
-    print(f'make dir => {dir_img}')
-    os.makedirs(dir_img, )
-    
-dicom = glob.glob(os.path.join(dir_dcm, '*.dcm'))
-
-pool = mp.Pool(p_size)
-for _ in tqdm.tqdm(pool.imap_unordered(convert_to_png_fastai, dicom), total=len(dicom)):
-    pass
-pool.close()
